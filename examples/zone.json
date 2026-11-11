@@ -1,0 +1,10 @@
+{
+  "origin": "tekzite.test.",
+  "ttl": 300,
+  "soa": {"primary": "ns1", "mailbox": "hostmaster", "serial": 1, "refresh": 3600, "retry": 600, "expire": 86400, "minimum": 60},
+  "records": [
+    {"name": "@", "type": "NS", "value": "ns1"},
+    {"name": "ns1", "type": "A", "value": "192.0.2.53"},
+    {"name": "www", "type": "A", "value": "192.0.2.42"}
+  ]
+}
