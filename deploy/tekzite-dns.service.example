@@ -1,0 +1,32 @@
+[Unit]
+Description=Tekzite DNS authoritative server
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=exec
+User=tekzite-dns
+Group=tekzite-dns
+WorkingDirectory=/opt/tekzite-dns
+ExecStart=/opt/tekzite-dns/.venv/bin/python /opt/tekzite-dns/src/tekzite_dns.py --zone /opt/tekzite-dns/examples/zone.json --listen 127.0.0.1 --port 5533 --local-only
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
+
+# For LAN staging, change ExecStart to include --listen <private LAN IP>
+# and --allow-client <trusted subnet CIDR> (repeat for IPv6).
+# Keep port 5533 until fully tested, and retain network firewall restrictions.
