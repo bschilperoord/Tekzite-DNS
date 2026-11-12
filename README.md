@@ -4,6 +4,19 @@
 
 > **v0.1.0-rc5: experimental release candidate, not production-certified.** This is a sanitized snapshot, not yet reconciled against the live router01 service. Do not expose it as a public recursive resolver.
 
+## Design philosophy
+
+Tekzite DNS is built around two complementary principles:
+
+1. **Eliminate unnecessary external DNS requests.**
+2. **Preserve reliability without sacrificing correctness.**
+
+**Remember intelligently. Verify when necessary. Never waste resources without a reason.**
+
+DNS answers should not be forgotten merely because a process restarts. Persistent local knowledge can reduce repeat lookups, while sensible refresh and expiry policies protect against outdated records. An address remaining unchanged in the past does not guarantee it is still correct, so stale records must be handled carefully and transparently.
+
+The long-term goal is a **local-first, privacy-respecting, resource-efficient DNS server** that only makes external requests when justified. These are project design goals, not a claim that all adaptive caching behavior is already implemented or that public DNS can operate with no external information.
+
 ## Requirements
 
 - Python 3.10+
