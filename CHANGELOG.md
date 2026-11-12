@@ -1,5 +1,9 @@
 # Changelog
 
+## Licensing (2026-11-12)
+
+- Published the MIT License, allowing use, modification, redistribution, sublicensing and commercial distribution with the copyright and license notice preserved.
+
 ## Unreleased (v0.1.0 release candidate)
 
 - Initial GitHub-ready release structure based on `tekzite_dns_lab_v9_improved.py` snapshot.
