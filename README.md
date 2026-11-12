@@ -57,7 +57,7 @@ python tools/soak.py --duration 43200 --qps 20 --workers 8 --output soak-results
 
 ## License
 
-No open-source license has been granted. Confirm code ownership and third-party provenance before adding one. Public visibility is not permission to redistribute or modify.
+Tekzite DNS is free and open-source software licensed under the [MIT License](LICENSE). You may use, copy, modify, redistribute, sublicense and sell copies, including modified versions, provided that you retain the copyright and license notice. No publication of modifications is required. The MIT grant applies to code and materials the copyright holder has rights to license; third-party dependencies retain their own licenses.
 
 ## Vulnerabilities
 
