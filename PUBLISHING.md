@@ -6,4 +6,4 @@ Publish this code as an **experimental release candidate** (`v0.1.0-rc5`), not a
 2. Enable GitHub private vulnerability reporting (Settings > Code security and analysis / Security).
 3. Do not claim the 12–24 hour soak test or external review has passed. Do not deploy over the active DNS service yet.
 
-**Licensing:** No license is included intentionally. Public availability is not an open-source grant. Choose a license only after reviewing ownership and any third-party code provenance.
+**Licensing:** Tekzite DNS is released under the [MIT License](LICENSE). Redistribution and modification, including commercial use, are permitted with retention of the copyright and license notice. Review third-party provenance and dependency licenses independently.
