@@ -15,7 +15,8 @@
 - [ ] Check snapshot signature/integrity, remote source trust, supply-chain dependencies, and failure rollback
 - [ ] Test restart/shutdown, TCP/UDP 53, IPv4/IPv6, simultaneous queries and memory footprint on Ubuntu
 - [ ] Verify no secrets, addresses, backup data, or raw query logs before public push
-- [ ] Choose license and confirm ownership of all committed code and data
+- [x] Choose license: MIT (Copyright 2026 Bas Schilperoord)
+- [ ] Confirm ownership and third-party provenance of all committed code and data
 - [ ] Tag release only after test results, review and real-world staging pass
 
 ## Protocol hardening checkpoint (2026-11-11)
@@ -43,7 +44,8 @@
 - [ ] Compare RAM, CPU, p50/p95/p99 latency, UDP timeout rate, TCP refusals, SQLite WAL size and cache growth
 - [ ] Confirm index creation cost on a backup of an actual production-size database
 - [ ] Review memory and DOS behavior under many unique client IPs, long-running TCP sessions and large RPZ sets
-- [ ] Confirm open-source license after verifying code provenance and ownership
+- [x] Publish MIT open-source license
+- [ ] Verify code provenance and ownership of third-party materials
 
 ## RC5 reproducible staging gate (2026-11-11)
 
@@ -53,7 +55,7 @@
 - [ ] Test representative on-demand SQLite cache and RPZ policies with staging copies
 - [ ] Capture cache DB, WAL and SHM sizes and integrity before/after with separately provisioned staging DB
 - [ ] Inspect actual running systemd ExecStart and all drop-ins before considering migration
-- [ ] Confirm operational security review, license/provenance, CI results and final release gate
+- [ ] Confirm operational security review, code provenance, CI results and final release gate
 
 **Limitations:** short localhost success is not a 12–24-hour soak or a proof
 of production readiness. RC5 is a staging-tooling milestone, not a stable release.
