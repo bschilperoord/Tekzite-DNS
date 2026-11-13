@@ -24,6 +24,7 @@ Configured local zones take precedence over learned answers.
 """
 
 import argparse
+import base64
 import ctypes
 import hashlib
 import ipaddress
@@ -52,6 +53,7 @@ from urllib.parse import urlsplit
 
 A, NS, CNAME, SOA, PTR, MX, TXT, AAAA, SRV, OPT, CAA = 1, 2, 5, 6, 12, 15, 16, 28, 33, 41, 257
 DS = 43
+SVCB, HTTPS = 64, 65
 QR, AA, TC, RD, RA = 0x8000, 0x0400, 0x0200, 0x0100, 0x0080
 OK, FORMERR, SERVFAIL, NXDOMAIN, NOTIMP, REFUSED, BADVERS = 0, 1, 2, 3, 4, 5, 16
 IN, ANY = 1, 255
@@ -89,7 +91,7 @@ TLD_BOOTSTRAP = {
 SINGLE_NAME = {NS, 3, 4, CNAME, 7, 8, 9, PTR}
 MAX_TTL = 2**31 - 1
 TYPES = {"A": A, "AAAA": AAAA, "CNAME": CNAME, "NS": NS, "PTR": PTR,
-         "MX": MX, "TXT": TXT, "SRV": SRV, "CAA": CAA}
+         "MX": MX, "TXT": TXT, "SRV": SRV, "CAA": CAA, "SVCB": SVCB, "HTTPS": HTTPS}
 LABEL = re.compile(rb"[a-z0-9_-]{1,63}")
 LOCAL_SUFFIXES = ((b"home", b"arpa"), (b"local",), (b"localhost",), (b"test",),
                   (b"invalid",), (b"example",), (b"onion",), (b"internal",))
@@ -1376,6 +1378,12 @@ class Authority:
                 )
                 db.execute("CREATE INDEX IF NOT EXISTS ondemand_expires_idx ON ondemand(expires)")
                 db.execute("CREATE INDEX IF NOT EXISTS ondemand_negative_expires_idx ON ondemand_negative(expires)")
+                db.execute(
+                    "CREATE TABLE IF NOT EXISTS ondemand_svcb "
+                    "(name TEXT NOT NULL, type INTEGER NOT NULL, wire TEXT NOT NULL, "
+                    "expires REAL NOT NULL, PRIMARY KEY(name,type))"
+                )
+                db.execute("CREATE INDEX IF NOT EXISTS ondemand_svcb_expiry_idx ON ondemand_svcb(expires)")
         self.resolver = resolver if resolver is not None else ResolverState()
 
     def maybe_prune_ondemand(self, connection):
@@ -1471,7 +1479,109 @@ class Authority:
         return connection
 
 
+    def answer_svcb_on_demand(self, question):
+        """Resolve HTTPS/SVCB via local Unbound without losing ECH parameters.
+
+        Store only canonical, self-contained RDATA bytes. Never copy compressed
+        offsets from upstream DNS packets into downstream DNS messages.
+        """
+        if (self.ondemand_db is None or question.cls != IN
+                or question.kind not in (SVCB, HTTPS) or not wan_name(question.name)):
+            return None
+        import dns.exception
+        import dns.resolver
+        import dns.rdatatype
+
+        hostname = name_text(lower_name(question.name)).rstrip(".")
+        kind = dns.rdatatype.to_text(question.kind)
+        cache_key = (hostname, question.kind)
+        lock = self.ondemand_key_locks[hash(cache_key) % len(self.ondemand_key_locks)]
+
+        def from_cache(conn):
+            row = conn.execute(
+                "SELECT wire,expires FROM ondemand_svcb "
+                "WHERE name=? AND type=? AND expires>?",
+                (hostname, question.kind, time.time()),
+            ).fetchone()
+            if row is None:
+                return None
+            try:
+                payload = json.loads(row[0])
+                remaining = max(1, int(row[1] - time.time()))
+                records = tuple(
+                    Record(domain(item[0]), int(item[1]), IN, remaining,
+                           base64.b64decode(item[2], validate=True))
+                    for item in payload
+                )
+                if not records or any(record.kind not in (CNAME, SVCB, HTTPS)
+                                      or len(record.data) > 65535 for record in records):
+                    return None
+                return Reply(OK, records)
+            except (ValueError, TypeError, UnicodeError, IndexError, KeyError):
+                return None
+
+        try:
+            with lock:
+                with closing(sqlite3.connect(self.ondemand_db, timeout=5)) as db:
+                    cached = from_cache(db)
+                    if cached is not None:
+                        return cached
+
+                resolver = dns.resolver.Resolver(configure=False)
+                resolver.nameservers = ["127.0.0.1"]
+                resolver.port = 53
+                resolver.timeout = 2
+                resolver.lifetime = 4
+                try:
+                    answer = resolver.resolve(hostname, kind, search=False)
+                except dns.resolver.NXDOMAIN:
+                    return Reply(NXDOMAIN)
+                except dns.resolver.NoAnswer:
+                    return Reply(OK)
+
+                records = []
+                ttl_values = []
+                for rrset in answer.response.answer:
+                    if rrset.rdtype not in (CNAME, SVCB, HTTPS) or rrset.rdclass != IN:
+                        continue
+                    owner = domain(rrset.name.to_text().lower())
+                    ttl = min(max(0, int(rrset.ttl)), 300)
+                    for item in rrset:
+                        # dnspython serializes SVCB/HTTPS key/value parameters
+                        # (including ECH) as independent uncompressed wire data.
+                        raw = item.to_wire()
+                        if len(raw) > 65535:
+                            continue
+                        records.append(Record(owner, rrset.rdtype, IN, ttl, raw))
+                        ttl_values.append(ttl)
+
+                if not records:
+                    return Reply(OK)
+                if len(records) > 64:
+                    return Reply(SERVFAIL)
+                cache_ttl = min(ttl_values)
+                if cache_ttl > 0:
+                    payload = json.dumps([
+                        [name_text(record.name), record.kind,
+                         base64.b64encode(record.data).decode("ascii")]
+                        for record in records
+                    ], separators=(",", ":"))
+                    with closing(sqlite3.connect(self.ondemand_db, timeout=5)) as db, db:
+                        db.execute(
+                            "INSERT OR REPLACE INTO ondemand_svcb "
+                            "(name,type,wire,expires) VALUES (?,?,?,?)",
+                            (hostname, question.kind, payload, time.time() + cache_ttl),
+                        )
+                        db.execute("DELETE FROM ondemand_svcb WHERE expires<?", (time.time(),))
+                return Reply(OK, tuple(records))
+        except (dns.exception.DNSException, OSError, sqlite3.Error,
+                ValueError, UnicodeError) as error:
+            logging.warning("HTTPS/SVCB lookup failed %s %s: %s", hostname, kind, error)
+            return Reply(SERVFAIL)
+
     def answer_on_demand(self, question):
+        if question.kind in (SVCB, HTTPS):
+            return self.answer_svcb_on_demand(question)
         if self.ondemand_db is None or question.cls != IN:
             return None
         if question.kind not in (A, AAAA, CNAME):
