@@ -75,3 +75,30 @@ Tekzite DNS is free and open-source software licensed under the [MIT License](LI
 ## Vulnerabilities
 
 See [SECURITY.md](SECURITY.md). Please report sensitive security issues privately rather than in public GitHub issues.
+
+
+## Native DNS-over-TLS (experimental, RC6)
+
+Tekzite DNS includes an **optional TLS/TCP DoT listener**, sharing the existing resolver, client allowlist, rate limit and DNS-over-TCP framing. Plain DNS remains unchanged. The server supports TLS 1.2+ (including TLS 1.3 when negotiated). DoT is not enabled unless the `--dot-listen`, `--dot-cert`, and `--dot-key` options are given together.
+
+Staging on a separate local-only port (do not modify your live systemd service yet):
+
+```bash
+python src/tekzite_dns.py --zone examples/zone.json --local-only \
+  --listen 127.0.0.1 --port 5533 \
+  --dot-listen 127.0.0.1 --dot-port 8853 \
+  --dot-cert /etc/tekzite-dns/tls/fullchain.pem \
+  --dot-key /etc/tekzite-dns/tls/privkey.pem
+```
+
+Inspect the certificate/handshake with:
+
+```bash
+openssl s_client -connect 127.0.0.1:8853 \
+  -servername basmediaserver.ddns.net \
+  -verify_hostname basmediaserver.ddns.net -verify_return_error </dev/null
+```
+
+For a LAN listener use `--dot-listen PRIVATE_LAN_IP --dot-port 8853`, explicitly permit the LAN's CIDR via `--allow-client`, and restrict the firewall to trusted clients. A client's DoT authentication hostname must match the server certificate. `dig @IP -p 8853` is **not** a DoT query: use a DNS client that supports TLS.
+
+The TLS certificate is loaded at service startup. After automatic renewal/certificate transfer the DoT process requires a planned restart to load the new certificate; transferring files alone does not trigger reload. Restrict the SSH certificate-deployment key to its installer. DoT encrypts **client-to-Tekzite traffic**, not necessarily Tekzite's upstream traffic, and does not itself validate DNSSEC.
