@@ -102,3 +102,21 @@ openssl s_client -connect 127.0.0.1:8853 \
 For a LAN listener use `--dot-listen PRIVATE_LAN_IP --dot-port 8853`, explicitly permit the LAN's CIDR via `--allow-client`, and restrict the firewall to trusted clients. A client's DoT authentication hostname must match the server certificate. `dig @IP -p 8853` is **not** a DoT query: use a DNS client that supports TLS.
 
 The TLS certificate is loaded at service startup. After automatic renewal/certificate transfer the DoT process requires a planned restart to load the new certificate; transferring files alone does not trigger reload. Restrict the SSH certificate-deployment key to its installer. DoT encrypts **client-to-Tekzite traffic**, not necessarily Tekzite's upstream traffic, and does not itself validate DNSSEC.
+
+
+## HTTPS/SVCB and Firefox ECH (RC7)
+
+RC7 resolves DNS **HTTPS (type 65)** and **SVCB (type 64)** records through the configured local Unbound instance on `127.0.0.1:53`. The server preserves SvcParams such as `ech=` in wire-format RDATA, and stores the answer in persistent SQLite with a capped TTL. Plain DNS and DoT share the same resolver behavior.
+
+Example verification with DoT (substitute your actual certificate hostname):
+
+```bash
+kdig @192.168.25.254 +tls +tls-ca \
+  +tls-hostname=basmediaserver.ddns.net dshield.org HTTPS
+```
+
+When an ECH-enabled site publishes the configuration, the HTTPS answer should contain `ech=`. Not all HTTPS records contain ECH settings: `NOERROR` without `ech=` is not itself an error.
+
+**Firefox and Portmaster:** Portmaster can send DNS to Tekzite using DoT (`dot://192.168.25.254:853?verify=basmediaserver.ddns.net`); Firefox can leave its own DoH disabled. Firefox's ECH support still depends on obtaining HTTPS records. If an RPZ such as HaGeZi blocks Firefox's HTTPS-record availability probe (`cloudflare-dns.com HTTPS` returned NXDOMAIN in one deployment), `network.dns.force_use_https_rr = true` in `about:config` was a successful *workaround*, not a server requirement. Prefer a scoped allowlist for the probe domain after identifying which policy blocked it. DoT protects DNS transport; ECH separately protects sensitive ClientHello data where supported.
+
+**Security and compatibility:** This feature uses the existing local Unbound fallback, not a new public DNS provider. Ensure `dnspython` is installed in the Tekzite Python environment and the fallback is permitted. Test a staging instance before changing the live DNS service. See `tests/test_ech_records.py` for regression tests.
