@@ -34,6 +34,7 @@ import random
 import re
 import shutil
 import socket
+import ssl
 import socketserver
 import struct
 import subprocess
@@ -1992,6 +1993,14 @@ class TcpServer(LimitedThreads, socketserver.TCPServer):
     request_queue_size = 64
 
 
+class DotServer(TcpServer):
+    """DNS-over-TLS listener, sharing the normal resolver and client limits."""
+
+    def __init__(self, address, handler, resolver, family=socket.AF_INET, *, ssl_context, **kwargs):
+        self.ssl_context = ssl_context
+        super().__init__(address, handler, resolver, family, **kwargs)
+
+
 class UdpHandler(socketserver.BaseRequestHandler):
     def handle(self):
         if not client_allowed(self.client_address[0], self.server.allowed_clients):
@@ -2022,6 +2031,31 @@ class TcpHandler(socketserver.BaseRequestHandler):
             return
 
 
+class DotHandler(TcpHandler):
+    """Authenticate TLS transport before processing length-prefixed DNS frames."""
+
+    def handle(self):
+        # Authorization and rate limits are enforced by LimitedThreads before
+        # this handler runs. Do not respond to plaintext requests on this port.
+        try:
+            self.request.settimeout(5)
+            with self.server.ssl_context.wrap_socket(self.request, server_side=True) as secure:
+                secure.settimeout(5)
+                self.request = secure
+                super().handle()
+        except (OSError, EOFError, ssl.SSLError):
+            # Invalid TLS handshakes should not produce tracebacks or DNS replies.
+            return
+
+
+def build_dot_context(certfile, keyfile):
+    """Create the server context at startup; a service restart loads renewed keys."""
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.load_cert_chain(certfile=str(certfile), keyfile=str(keyfile))
+    return context
+
+
 def zones_from_config(config):
     return [Zone(item) for item in (config if isinstance(config, list) else [config])]
 
@@ -2039,6 +2073,14 @@ def main():
     parser.add_argument("--listen", type=ipaddress.ip_address, action="append", metavar="IP",
                         help="listen on this IPv4 or IPv6 address (repeatable, default 127.0.0.1)")
     parser.add_argument("--port", type=int, default=5533)
+    parser.add_argument("--dot-listen", type=ipaddress.ip_address, action="append", metavar="IP",
+                        help="optional DoT listener IP; repeatable; must be loopback or private LAN")
+    parser.add_argument("--dot-port", type=int, default=853, metavar="PORT",
+                        help="DNS-over-TLS TCP port (default 853; use 8853 for staging)")
+    parser.add_argument("--dot-cert", type=Path, metavar="PEM",
+                        help="fullchain PEM for DoT (required with --dot-listen)")
+    parser.add_argument("--dot-key", type=Path, metavar="PEM",
+                        help="private key PEM for DoT (required with --dot-listen)")
     parser.add_argument("--allow-client", type=ipaddress.ip_network, action="append", metavar="CIDR",
                         help="allowed client IPv4/IPv6 range (repeatable); default loopback only")
     parser.add_argument("--max-workers", type=int, default=32, metavar="N",
@@ -2076,6 +2118,14 @@ def main():
         return
     if not 1 <= args.port <= 65535:
         parser.error("port must be between 1 and 65535")
+    if not 1 <= args.dot_port <= 65535:
+        parser.error("--dot-port must be between 1 and 65535")
+    if bool(args.dot_listen) != bool(args.dot_cert) or bool(args.dot_listen) != bool(args.dot_key):
+        parser.error("--dot-listen, --dot-cert, and --dot-key must all be specified together")
+    if args.dot_listen and args.dot_port == args.port and set(args.dot_listen) & set(args.listen or [ipaddress.ip_address("127.0.0.1")]):
+        parser.error("DoT and plaintext TCP cannot share an address and port")
+    if args.dot_listen and any(ip.is_unspecified or ip.is_global or ip.is_multicast for ip in args.dot_listen):
+        parser.error("DoT listeners must use specific loopback or private LAN addresses")
     if not 1 <= args.max_workers <= 1024:
         parser.error("--max-workers must be between 1 and 1024")
     if not 0 <= args.rate_limit <= 100000 or not math.isfinite(args.rate_limit):
@@ -2106,7 +2156,7 @@ def main():
     allowed_clients = tuple(args.allow_client or (
         ipaddress.ip_network("127.0.0.0/8"), ipaddress.ip_network("::1/128")
     ))
-    if any(not ip.is_loopback for ip in listen_ips) and not args.allow_client:
+    if any(not ip.is_loopback for ip in listen_ips + list(args.dot_listen or ())) and not args.allow_client:
         parser.error("non-loopback listeners require an explicit --allow-client CIDR")
     if (args.learn_wan or args.resolve_wan or args.ondemand_db) and any(
         ip.is_unspecified or ip.is_global for ip in listen_ips
@@ -2187,6 +2237,11 @@ def main():
         except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
             logging.warning("could not load cached zones %s: %s", cached_zones, error)
     zone_names = ", ".join(name_text(origin) for origin in authority.zones)
+    dot_ips = list(dict.fromkeys(args.dot_listen or ()))
+    try:
+        dot_context = build_dot_context(args.dot_cert, args.dot_key) if dot_ips else None
+    except (OSError, ssl.SSLError, ValueError) as error:
+        parser.error(f"could not load DoT certificate/key: {error}")
     has_ipv4_listener = any(ip.version == 4 for ip in listen_ips)
     rate_limiter = (ClientRateLimiter(args.rate_limit, args.rate_burst)
                     if args.rate_limit else None)
@@ -2204,6 +2259,14 @@ def main():
                               rate_limiter=rate_limiter)))
                 listeners.append(stack.enter_context(
                     TcpServer(address, TcpHandler, authority, family, ipv6_only=has_ipv4_listener,
+                              allowed_clients=allowed_clients, max_workers=args.max_workers,
+                              rate_limiter=rate_limiter)))
+            for ip in dot_ips:
+                address = (str(ip), args.dot_port)
+                family = socket.AF_INET6 if ip.version == 6 else socket.AF_INET
+                listeners.append(stack.enter_context(
+                    DotServer(address, DotHandler, authority, family, ssl_context=dot_context,
+                              ipv6_only=has_ipv4_listener or any(x.version == 4 for x in dot_ips),
                               allowed_clients=allowed_clients, max_workers=args.max_workers,
                               rate_limiter=rate_limiter)))
             if capture:
@@ -2231,6 +2294,8 @@ def main():
             for ip in listen_ips:
                 logging.info("authoritative DNS for %s on %s port %d (UDP and TCP)",
                              zone_names, ip, args.port)
+            for ip in dot_ips:
+                logging.info("DNS-over-TLS for %s on %s port %d (TCP)", zone_names, ip, args.dot_port)
             listeners[0].serve_forever()
     except KeyboardInterrupt:
         pass
