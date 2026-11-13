@@ -59,3 +59,13 @@
 
 **Limitations:** short localhost success is not a 12–24-hour soak or a proof
 of production readiness. RC5 is a staging-tooling milestone, not a stable release.
+
+
+## RC6 native DoT gate
+
+- [x] Optional DoT listener and local TLS handshake tests
+- [x] Existing plaintext regression tests still pass
+- [ ] Test using the installed certificate on router01's separate staging port 8853
+- [ ] Confirm client hostname verification and firewall scope
+- [ ] Restrict SSH certificate-deployment key to forced installer command
+- [ ] Implement and test safe restart/reload after certificate renewal
