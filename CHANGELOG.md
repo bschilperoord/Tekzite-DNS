@@ -52,3 +52,11 @@
   staging commands and the separate live-feature validation requirements.
 - Initial 12-second baseline: 480 successful requests out of 480, zero timeouts;
   no recursive, SQLite or RPZ behaviors exercised in this baseline.
+
+
+## 0.1.0-rc6 (2026-11-13)
+
+- Added optional native DNS-over-TLS with PEM certificate/key and configurable listener/port.
+- Reused existing client access and request limits; plaintext DNS port 53 behavior unchanged.
+- Added certificate verification, TLS DNS exchange, unauthorized-client and plaintext-rejection tests.
+- TLS context loads on startup; certificate renewal requires a planned restart.
