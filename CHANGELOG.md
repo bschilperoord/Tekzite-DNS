@@ -60,3 +60,12 @@
 - Reused existing client access and request limits; plaintext DNS port 53 behavior unchanged.
 - Added certificate verification, TLS DNS exchange, unauthorized-client and plaintext-rejection tests.
 - TLS context loads on startup; certificate renewal requires a planned restart.
+
+
+## 0.1.0-rc7 (2026-11-13)
+
+- Fixed `REFUSED` for eligible HTTPS (DNS type 65) and SVCB (type 64) queries by resolving through the local Unbound fallback.
+- Preserved ECH and other SvcParams as wire-format resource record data.
+- Added persistent SQLite caching with TTL expiry for HTTPS/SVCB answers.
+- Added tests for HTTPS/SVCB resolution, ECH preservation, response behavior and persistence.
+- Documented Firefox ECH detection with Portmaster DoT and HaGeZi filtering.
