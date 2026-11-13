@@ -69,3 +69,13 @@ of production readiness. RC5 is a staging-tooling milestone, not a stable releas
 - [ ] Confirm client hostname verification and firewall scope
 - [ ] Restrict SSH certificate-deployment key to forced installer command
 - [ ] Implement and test safe restart/reload after certificate renewal
+
+
+## RC7 HTTPS/SVCB and ECH
+
+- [x] Regression tests cover HTTPS/SVCB type 64/65, ECH wire data and SQLite caching
+- [x] Live DoT test reported `NOERROR` for `cloudflare.com HTTPS` on router01
+- [x] Firefox ECH worked with HTTPS RR availability-check override in tested setup
+- [ ] Verify public hostname with actual `ech=` through Portmaster and Firefox
+- [ ] Replace Firefox workaround with a scoped RPZ allowlist after policy confirmation
+- [ ] Monitor cache TTL behavior and restarts in production
